@@ -1,4 +1,4 @@
-# Pan-Tilt Vision Tracker
+# Smart Camera Tracking with Python, OpenCV, and YOLO
 
 An educational rebuild of a camera-based pan-tilt tracker using Python,
 OpenCV, YOLO, and an Arduino Nano. Development proceeds one learning activity
@@ -122,4 +122,10 @@ Hardware and tracking screenshots will be added after the first working tests.
 
 - **2026-11-08:** Preserved both original scripts, reviewed the tracking flow,
   researched initial model candidates, and initialized local version control.
-  GitHub remote setup is pending.
+  Public repository: [smart-camera-tracking-python-opencv-yolo](https://github.com/xJosephMorganx/smart-camera-tracking-python-opencv-yolo).
+
+## License
+
+This project is licensed under the GNU General Public License v3.0
+(GPL-3.0-only). See [LICENSE](LICENSE) for the full license text.
+Third-party libraries, datasets, and model weights retain their own licenses.
