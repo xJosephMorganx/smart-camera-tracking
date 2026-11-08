@@ -1,14 +1,13 @@
 # Smart Camera Tracking
 
-An educational rebuild of a camera-based pan-tilt tracker using Python,
-OpenCV, YOLO, and an Arduino Nano. Development proceeds one learning activity
-at a time, with the learner writing the implementation.
+A camera-based pan-tilt tracking system using Python, OpenCV, YOLO, and an
+Arduino Nano, with face tracking and pinch-controlled hand tracking modes.
 
 ## Status
 
-Planning and reference review only. The new tracker and Nano firmware have
-not been implemented or tested. The original scripts are preserved unchanged;
-their existing comments and messages include Spanish.
+Under development. The repository currently contains the original MediaPipe
+tracking and virtual-camera scripts. The YOLO-based tracker and Arduino Nano
+firmware have not yet been implemented or tested.
 
 ## Planned behavior
 
@@ -34,42 +33,13 @@ their existing comments and messages include Spanish.
 ## Current project structure
 
 ```text
-Pan-tilt/
+smart-camera-tracking/
 ├── .gitignore
+├── LICENSE
 ├── README.md
 ├── meet.py                       # Original virtual-camera reference
 └── pan_tilt_mediapipe_hands.py    # Original tracking reference
 ```
-
-Add `src/` when the first Python exercises need a home and
-`firmware/pan_tilt/pan_tilt.ino` when firmware development begins.
-Split detection, gesture logic, motion control, and serial communication
-into modules progressively rather than creating empty scaffolding now.
-
-## Reference review
-
-The original tracker uses MediaPipe Hand Landmarker, OpenCV, PySerial, and
-PyVirtualCam. It measures thumb–index distance with landmarks 4 and 8 and
-already provides a palm-center calculation using landmarks 0, 5, 9, 13, and 17.
-However, `TARGET_MODE` currently selects the index fingertip.
-
-Reusable concepts include image-center error, deadband, proportional gain,
-bounded angular increments, axis signs, target smoothing, and timed serial
-transmission. The reference sends `dx,dy\n` every 50 ms at most, including
-`0,0\n` when tracking is inactive. Its intended interpretation is relative
-motion; the missing firmware prevents verification of receiver behavior.
-The new protocol is still to be designed.
-
-Review points for later exercises:
-
-- Integer truncation with gain 0.035 makes errors below about 29 pixels
-  produce no motion, despite the explicit 10-pixel deadband.
-- A fixed 35-pixel pinch threshold depends on hand distance and image scale.
-- The optional One Euro filters are not reset when the hand disappears.
-- Resource initialization occurs before the cleanup block, so some startup
-  failures can leave previously opened resources without explicit cleanup.
-- `meet.py` derives the virtual-camera size from the actual captured frame;
-  the tracker instead uses the requested size.
 
 ## Model candidates
 
@@ -88,26 +58,12 @@ Research date: 2026-11-08. No weights have been downloaded or evaluated locally.
 Generic COCO pose weights target body landmarks, not the 21 hand landmarks.
 Model choice must be validated before implementing gesture recognition.
 
-## Learning sequence
-
-1. Prepare the Python and Arduino environments.
-2. Capture and inspect camera frames.
-3. Detect faces and track a visual target without servo motion.
-4. Estimate hand landmarks and recognize pinch.
-5. Build Nano firmware incrementally and define the shared serial protocol.
-6. Test serial communication, then implement bounded pan-tilt control.
-7. Integrate modes, calibrate, and verify behavior under load.
-8. Add virtual-camera output and final documentation.
-
-Each activity includes an explanation, learner-written code, a focused test,
-and a comprehension question before proceeding.
-
 ## Setup and usage
 
-Environment versions, installation commands, and run instructions will be
-documented during the first learning activity. Do not treat the reference
-scripts as a ready-to-run Nano implementation: they contain machine-specific
-camera and serial settings and require external model assets.
+Installation and run instructions will be added once the implementation is
+available. The reference scripts contain machine-specific camera and serial
+settings and require external model assets; they are not a ready-to-run
+Arduino Nano implementation.
 
 ## Preview
 
@@ -117,12 +73,6 @@ Hardware and tracking screenshots will be added after the first working tests.
 ![Pan-tilt hardware](docs/images/hardware.jpg)
 ![Tracking preview](docs/images/tracking-preview.png)
 -->
-
-## Development log
-
-- **2026-11-08:** Preserved both original scripts, reviewed the tracking flow,
-  researched initial model candidates, and initialized local version control.
-  Public repository: [smart-camera-tracking](https://github.com/xJosephMorganx/smart-camera-tracking).
 
 ## License
 
