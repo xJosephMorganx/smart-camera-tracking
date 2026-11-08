@@ -37,9 +37,20 @@ smart-camera-tracking/
 ├── .gitignore
 ├── LICENSE
 ├── README.md
-├── meet.py                       # Original virtual-camera reference
-└── pan_tilt_mediapipe_hands.py    # Original tracking reference
+├── hardware/                    # CAD, STEP/STP, and 3D-printing files (empty locally)
+├── firmware/                    # Arduino Nano firmware
+└── python/
+    └── references/
+        ├── meet.py
+        └── pan_tilt_mediapipe_hands.py
 ```
+
+The original scripts are kept in `python/references/`. New camera and tracking
+code belongs in `python/`; Arduino sketches belong in `firmware/`.
+The `hardware/` directory is reserved for mechanical design assets. It remains
+empty locally and will appear in Git when its first files are added.
+Use a local `.venv/` at the repository root for Python dependencies; it is
+excluded from version control.
 
 ## Model candidates
 
