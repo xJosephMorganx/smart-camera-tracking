@@ -146,7 +146,7 @@ the package matching your distribution and kernel. See the
 
 ## Documentation
 
-- **[Code walkthrough and presentation guide](docs/code-walkthrough.md)** —
+- **[Code walkthrough and presentation guide (Spanish)](docs/code-walkthrough.md)** —
   frame-by-frame explanation, OpenCV operations, formulas, serial protocol,
   concurrency, tests, limitations and a classroom demonstration plan.
 - **[Usage and troubleshooting](docs/web-interface.md)** — controls, virtual

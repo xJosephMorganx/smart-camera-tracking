@@ -1,129 +1,146 @@
-# PanTilt: Python and OpenCV code walkthrough
+# PanTilt: explicación del código Python y OpenCV
 
-This guide explains the implemented application, with enough detail to read
-the source and present it in class. Read it alongside the linked files;
-short code examples below illustrate the real algorithms but omit some
-validation and cleanup. They are not replacement scripts.
+Esta guía explica la aplicación implementada con el detalle necesario para
+leer el código y presentarlo en clase. Conviene consultar los archivos
+vinculados mientras se lee. Los ejemplos breves ilustran los algoritmos
+reales, pero omiten algunas validaciones y tareas de limpieza; no sustituyen
+los archivos del programa.
 
-## 1. Project objective and scope
+Los nombres de funciones, variables y botones se conservan en inglés para
+que puedas encontrarlos directamente en el código y en la interfaz.
 
-The goal is to keep a visual target near the center of a camera image by
-moving a pan-tilt mount. Python reads camera frames, detects a target,
-calculates a correction and sends it to an Arduino. The Arduino applies the
-correction to two servo angles. Flask exposes the controls and preview in a
-browser instead of using `cv2.imshow()`.
+## 1. Objetivo y alcance del proyecto
 
-There are three operating modes:
+El objetivo es mantener un objeto de seguimiento cerca del centro de la
+imagen mediante un soporte de cámara con dos ejes: **pan**, giro horizontal,
+y **tilt**, inclinación vertical. Python lee los fotogramas de la cámara,
+detecta un objetivo, calcula una corrección y la envía al Arduino. El Arduino
+aplica esa corrección a los ángulos de dos servomotores. Flask permite manejar
+los controles y ver el video en un navegador, en lugar de usar `cv2.imshow()`.
 
-| Mode | Target | Condition for movement |
+La aplicación tiene tres modos:
+
+| Modo | Objetivo | Condición para moverse |
 | --- | --- | --- |
-| Static | None | No automatic following. Explicit Home is still available. |
-| Face | Center of the largest face rectangle | A valid face and enabled servo tracking. |
-| Hand | Index fingertip | Valid hand landmarks, an active pinch and enabled servo tracking. |
+| Static | Ninguno | No hay seguimiento automático. El botón Home sigue disponible. |
+| Face | Centro del rectángulo del rostro más grande | Rostro válido y seguimiento de servos habilitado. |
+| Hand | Punta del dedo índice | Puntos de la mano válidos, gesto de pinza activo y seguimiento habilitado. |
 
-This is a visual feedback system: a correction changes the camera direction,
-and the next image supplies a new error. It does not measure servo shaft
-position. The face model does not identify people, and this project does not
-train either model. The custom work is the image pipeline, target selection,
-gesture gating, movement policy, interface, state management and integration.
+Es un sistema de realimentación visual: una corrección cambia la dirección
+de la cámara y la siguiente imagen proporciona un nuevo error. El programa
+no mide la posición del eje de los servos. El modelo de rostros no identifica
+personas y en este proyecto no se entrena ninguno de los modelos.
 
-## 2. Responsibilities and reading order
+El desarrollo propio comprende el procesamiento de imágenes, la selección
+del objetivo, la activación por gestos, la lógica de movimiento, la interfaz,
+la gestión del estado y la integración entre componentes.
 
-| File | Main objects/functions | Why it exists |
+## 2. Responsabilidades y orden de lectura
+
+| Archivo | Objetos o funciones principales | Responsabilidad |
 | --- | --- | --- |
-| [web_app.py](../python/web_app.py) | `main`, `create_app` | Parse CLI options and translate HTTP requests into service calls. |
-| [tracking_service.py](../python/tracking_service.py) | `TrackingService`, `tracking_frame` | Own hardware and coordinate every frame of the session. |
-| [tracking_targets.py](../python/tracking_targets.py) | `TrackingTarget`, `face_target`, `hand_target` | Convert model results into a common target and draw annotations. |
-| [hand_detector.py](../python/hand_detector.py) | `HandDetector` | Convert OpenCV images into MediaPipe input. |
-| [motion_control.py](../python/motion_control.py) | `MotionController`, `calculate_axis_step` | Convert target error into bounded relative commands. |
-| [tracking_config.py](../python/tracking_config.py) | Constants | Keep resolutions, paths, signs and tuning easy to find. |
-| [camera_devices.py](../python/camera_devices.py) | `list_cameras` | Discover usable physical V4L2 capture devices. |
-| [local_settings.py](../python/local_settings.py) | Load/save/validate helpers | Persist the pinch ratio without restarting the app. |
-| [app.js](../python/static/app.js) | `render`, `command`, `poll` | Synchronize browser controls with server state. |
-| [Arduino sketch](../firmware/pan_tilt/pan_tilt.ino) | `setup`, `loop`, `approach` | Receive commands and write servo positions. |
+| [web_app.py](../python/web_app.py) | `main`, `create_app` | Interpretar las opciones de terminal y convertir peticiones HTTP en llamadas al servicio. |
+| [tracking_service.py](../python/tracking_service.py) | `TrackingService`, `tracking_frame` | Administrar el hardware y coordinar cada fotograma de la sesión. |
+| [tracking_targets.py](../python/tracking_targets.py) | `TrackingTarget`, `face_target`, `hand_target` | Convertir resultados de los modelos en un objetivo común y dibujar los marcadores. |
+| [hand_detector.py](../python/hand_detector.py) | `HandDetector` | Adaptar las imágenes de OpenCV a la entrada de MediaPipe. |
+| [motion_control.py](../python/motion_control.py) | `MotionController`, `calculate_axis_step` | Convertir el error del objetivo en comandos relativos limitados. |
+| [tracking_config.py](../python/tracking_config.py) | Constantes | Centralizar resoluciones, rutas, signos y parámetros de ajuste. |
+| [camera_devices.py](../python/camera_devices.py) | `list_cameras` | Encontrar dispositivos físicos de captura V4L2 utilizables. |
+| [local_settings.py](../python/local_settings.py) | Funciones de carga, guardado y validación | Conservar el ajuste de pinza entre ejecuciones. |
+| [app.js](../python/static/app.js) | `render`, `command`, `poll` | Sincronizar los controles del navegador con el estado del servidor. |
+| [Programa de Arduino](../firmware/pan_tilt/pan_tilt.ino) | `setup`, `loop`, `approach` | Recibir comandos y actualizar las posiciones de los servos. |
 
-Start with `TrackingService._run()`. It shows how the smaller modules fit
-together. Then read target extraction and motion control before studying the
-web interface.
+Empieza por `TrackingService._run()`: muestra cómo se conectan los módulos.
+Después revisa la extracción del objetivo y el control de movimiento, antes
+de estudiar la interfaz web.
 
-## 3. What OpenCV does in this project
+## 3. Qué hace OpenCV en este proyecto
 
-A frame is a NumPy array. At 720p its shape is `(720, 1280, 3)`: height, width,
-and three BGR color channels. Coordinates use `x` horizontally and `y`
-vertically, while array indexing uses `frame[y, x]`.
+Un fotograma es un arreglo de NumPy. A 720p tiene forma `(720, 1280, 3)`:
+alto, ancho y tres canales de color BGR. Las coordenadas usan `x` para la
+posición horizontal y `y` para la vertical, pero el acceso al arreglo se
+escribe `frame[y, x]`.
 
-| Operation | Use in this code |
+| Operación | Uso en el programa |
 | --- | --- |
-| `cv2.VideoCapture(source, cv2.CAP_V4L2)` | Open a Linux camera. |
-| `camera.set(...)` | Request MJPEG, 1280×720, 30 FPS and a small capture buffer. |
-| `camera.read()` | Return success plus the next decoded image. |
-| `cv2.resize(..., INTER_AREA)` | Reduce the image for inference while preserving its proportions. |
-| `cv2.cvtColor(..., COLOR_BGR2RGB)` | Convert BGR to RGB before MediaPipe. |
-| `cv2.rectangle`, `line`, `circle`, `drawMarker`, `putText` | Draw detection and control information on the preview copy. |
-| `cv2.imencode('.jpg', ...)` | Encode the annotated frame for browser streaming. |
-| `camera.release()` | Release the capture device during cleanup or camera switching. |
+| `cv2.VideoCapture(source, cv2.CAP_V4L2)` | Abrir una cámara en Linux. |
+| `camera.set(...)` | Solicitar MJPEG, 1280×720, 30 FPS y un búfer de captura pequeño. |
+| `camera.read()` | Obtener un indicador de éxito y la siguiente imagen decodificada. |
+| `cv2.resize(..., INTER_AREA)` | Reducir la imagen para inferencia conservando sus proporciones. |
+| `cv2.cvtColor(..., COLOR_BGR2RGB)` | Convertir BGR a RGB antes de usar MediaPipe. |
+| `cv2.rectangle`, `line`, `circle`, `drawMarker`, `putText` | Dibujar información de detección y control en la copia de vista previa. |
+| `cv2.imencode('.jpg', ...)` | Codificar el fotograma anotado para enviarlo al navegador. |
+| `camera.release()` | Liberar la cámara al terminar o cambiar de dispositivo. |
 
-OpenCV is central to the video pipeline, but it is not the face or hand model.
-YOLO inference runs through Ultralytics; hand landmarks come from MediaPipe.
-The capture pattern follows OpenCV's documented `VideoCapture` / `read` /
-`release` lifecycle. [OpenCV video tutorial](https://docs.opencv.org/4.x/dd/d43/tutorial_py_video_display.html).
+OpenCV es central en el manejo del video, pero no es el modelo que detecta
+rostros o manos. La inferencia de YOLO se ejecuta mediante Ultralytics y los
+puntos de la mano provienen de MediaPipe. La captura sigue el ciclo
+`VideoCapture` / `read` / `release` documentado por OpenCV.
+[Tutorial de video de OpenCV](https://docs.opencv.org/4.x/dd/d43/tutorial_py_video_display.html).
 
-## 4. Startup and one complete frame
+## 4. Inicio del programa y recorrido de un fotograma
 
-`web_app.main()` constructs a `TrackingService` and starts Flask on
-`127.0.0.1`. Loading the page does not open the camera or Arduino. Clicking
-**Start session** calls `POST /api/session/start`, which launches one worker
-thread using `TrackingService.start()`.
+`web_app.main()` construye un `TrackingService` e inicia Flask en
+`127.0.0.1`. Abrir la página no abre todavía la cámara ni el puerto del
+Arduino. Al pulsar **Start session**, el navegador llama a
+`POST /api/session/start`, que inicia un hilo de trabajo mediante
+`TrackingService.start()`.
 
-The worker checks that both model files exist, initializes YOLO and
-MediaPipe, opens the camera, and creates a `MotionController` without a
-serial connection. Both models are loaded even in Static mode, but neither
-runs inference in Static mode.
+El hilo comprueba que existan ambos archivos de modelos, inicializa YOLO y
+MediaPipe, abre la cámara y crea un `MotionController` sin conexión serial.
+Los dos modelos se cargan incluso en Static, pero en ese modo ninguno ejecuta
+inferencia: no se analizan los fotogramas para detectar objetivos.
 
-The per-frame loop follows this sequence:
+El ciclo de procesamiento sigue estos pasos:
 
-1. Copy the requested settings and their `revision` while holding the lock.
-2. Apply camera changes; close the old virtual producer if its source changes.
-3. Open serial only when tracking or Home needs it. Wait two seconds for the
-   Arduino startup, then send a zero correction.
-4. Advance a pending Home sequence and reset filter/pinch history if controls changed.
-5. Read the camera into `raw`; stop the session with an error if reading fails.
-6. Create `preview = raw.copy()` and, for a tracking mode, a reduced image.
-7. Run only the selected detector; extract a `TrackingTarget` and annotations.
-8. Recheck `revision` and the stop flag before issuing movement. Discard stale
-   results if a user changed controls during inference.
-9. Send the clean `raw` image to the virtual camera when output is enabled.
-10. Add the center marker and filtered target to `preview`, optionally encode
-    it for the browser, and publish status/FPS.
+1. Copiar la configuración solicitada y su `revision` mientras se mantiene
+   el bloqueo de acceso a los datos compartidos.
+2. Aplicar cambios de cámara y cerrar la salida virtual anterior si cambia
+   la fuente de video.
+3. Abrir el puerto serial solamente cuando el seguimiento o Home lo necesita.
+   Esperar dos segundos al arranque del Arduino y enviar una corrección cero.
+4. Avanzar una secuencia Home pendiente y reiniciar el historial del filtro
+   y de la pinza si cambiaron los controles.
+5. Leer la cámara en `raw`; si falla la lectura, terminar la sesión con error.
+6. Crear `preview = raw.copy()` y, si hay seguimiento, una imagen reducida.
+7. Ejecutar únicamente el detector seleccionado y obtener un `TrackingTarget`
+   junto con los marcadores de visualización.
+8. Volver a comprobar `revision` y la solicitud de parada antes de mover los
+   servos. Descartar resultados antiguos si cambiaron los controles durante
+   la inferencia.
+9. Enviar la imagen limpia `raw` a la cámara virtual, si está habilitada.
+10. Añadir a `preview` la marca central y la posición filtrada; codificarla
+    para el navegador si corresponde y publicar el estado y los FPS.
 
 ```mermaid
 flowchart TD
-    Read[OpenCV camera.read] --> Raw[raw: full-resolution BGR array]
-    Raw --> Small[tracking_frame: reduced image]
-    Small --> Mode{Selected mode}
-    Mode -->|Face| YOLO[YOLO → largest face center]
-    Mode -->|Hand| MP[MediaPipe → landmarks → pinch and index tip]
+    Read[OpenCV camera.read] --> Raw[raw: arreglo BGR en resolución completa]
+    Raw --> Small[tracking_frame: imagen reducida]
+    Small --> Mode{Modo seleccionado}
+    Mode -->|Face| YOLO[YOLO → centro del rostro más grande]
+    Mode -->|Hand| MP[MediaPipe → puntos → pinza y punta del índice]
     YOLO --> Target[TrackingTarget]
     MP --> Target
-    Target --> Check[Revision check and movement controller]
-    Check --> Serial[Relative serial correction]
-    Raw --> Clean[pyvirtualcam: clean video]
+    Target --> Check[Comprobar revisión y calcular movimiento]
+    Check --> Serial[Corrección relativa por serial]
+    Raw --> Clean[pyvirtualcam: video limpio]
     Raw --> Copy[preview = raw.copy]
     Target --> Copy
-    Copy --> JPEG[Optional JPEG encoding]
-    JPEG --> Browser[Flask MJPEG stream → browser image]
+    Copy --> JPEG[Codificación JPEG opcional]
+    JPEG --> Browser[Flujo MJPEG de Flask → imagen del navegador]
 ```
 
-The branches represent data use, not independent processing threads. Capture,
-inference and output are sequential in the same worker.
+Las ramas representan usos de los datos, no hilos independientes de
+procesamiento. La captura, la inferencia y la salida se ejecutan de forma
+secuencial en el mismo hilo de trabajo.
 
-## 5. HD output and smaller inference images
+## 5. Salida HD e imágenes pequeñas para inferencia
 
-`tracking_config.py` requests capture at **1280×720**. The camera may negotiate
-a different resolution, so the service reports the dimensions from actual
-frames rather than assuming the request succeeded.
+`tracking_config.py` solicita una captura de **1280×720**. La cámara puede
+negociar otra resolución, por lo que el servicio informa las dimensiones
+reales de los fotogramas, sin asumir que la solicitud se cumplió.
 
-`tracking_frame()` computes:
+`tracking_frame()` calcula:
 
 ```python
 scale = min(1.0, 640 / max(height, width))
@@ -131,27 +148,29 @@ new_width = round(width * scale)
 new_height = round(height * scale)
 ```
 
-For 1280×720, `scale = 0.5`, producing 640×360. A 640×480 image stays unchanged.
-The code never stretches a 16:9 image into 4:3 and never enlarges a small input.
-`INTER_AREA` is the resize interpolation selected by this implementation.
+Para 1280×720, `scale = 0.5` y el resultado es 640×360. Una imagen de 640×480
+no cambia. El código no deforma una imagen 16:9 para convertirla en 4:3 ni
+amplía una entrada pequeña. `INTER_AREA` es el método de interpolación usado
+al reducirla.
 
-| Stage | Typical size at 720p capture |
+| Etapa | Tamaño habitual con captura a 720p |
 | --- | --- |
-| `raw` and `preview` | 1280×720 |
-| Shared detection input copy | 640×360 |
-| YOLO inference size setting | `imgsz=320`; the library handles preprocessing/padding |
-| MediaPipe input | 640×360 RGB; the library handles internal model processing |
-| Browser stream | 1280×720 JPEG, quality 90 |
-| Virtual-camera input | 1280×720 BGR, without preview annotations |
+| `raw` y `preview` | 1280×720 |
+| Copia para el detector seleccionado | 640×360 |
+| Ajuste de tamaño de inferencia de YOLO | `imgsz=320`; la biblioteca gestiona el preprocesamiento y relleno |
+| Entrada a MediaPipe | 640×360 RGB; la biblioteca gestiona el procesamiento interno del modelo |
+| Flujo hacia el navegador | JPEG de 1280×720, calidad 90 |
+| Entrada a la cámara virtual | BGR de 1280×720, sin marcadores de vista previa |
 
-The browser's CSS display size is not the capture resolution. The virtual
-output does not decode the browser JPEG or reuse the reduced inference image.
-It receives `raw` directly. It can still undergo pixel-format conversion in
-the virtual-camera backend and compression in a receiving video application.
+El tamaño visual definido por CSS en el navegador no es la resolución de
+captura. La salida virtual no decodifica el JPEG del navegador ni reutiliza
+la imagen reducida de inferencia: recibe `raw` directamente. Aun así, puede
+haber conversión del formato de píxeles en el sistema de cámara virtual y
+compresión en la aplicación de videollamadas.
 
-## 6. Face detection and coordinate mapping
+## 6. Detección de rostros y conversión de coordenadas
 
-The worker calls:
+El hilo de trabajo llama a:
 
 ```python
 result = face_model.predict(
@@ -159,342 +178,381 @@ result = face_model.predict(
 )[0]
 ```
 
-This is inference with the local face-specific weights, not generic person
-detection. The prediction API returns bounding boxes; see the
-[Ultralytics prediction reference](https://docs.ultralytics.com/modes/predict/).
+Se hace inferencia con los pesos locales especializados en rostros, no una
+detección genérica de personas. La API devuelve rectángulos delimitadores;
+consulta la [referencia de predicción de Ultralytics](https://docs.ultralytics.com/modes/predict/).
 
-`face_target()` obtains `result.boxes.xyxy`, converts it to a NumPy array, and
-uses `largest_box_index()` to select the greatest rectangle area:
+`face_target()` obtiene `result.boxes.xyxy`, lo convierte en un arreglo de
+NumPy y usa `largest_box_index()` para seleccionar el rectángulo de mayor área:
 
 ```text
 area = (x2 - x1) × (y2 - y1)
 ```
 
-YOLO's result coordinates refer to the supplied detection image. The code
-maps them to preview coordinates with `preview_width / source_width` and
-`preview_height / source_height`. A box `(100, 50, 200, 150)` in a 640×360 input
-becomes `(200, 100, 400, 300)` in a 1280×720 preview. Its center is `(300, 200)`.
+Las coordenadas del resultado se refieren a la imagen enviada al detector.
+El código las convierte a coordenadas de vista previa usando
+`preview_width / source_width` y `preview_height / source_height`.
+Un rectángulo `(100, 50, 200, 150)` en una entrada de 640×360 se convierte en
+`(200, 100, 400, 300)` en una vista de 1280×720. Su centro es `(300, 200)`.
 
-The center, not a facial landmark, becomes the target. No boxes means an
-inactive target, so the controller holds position. Choosing the largest box
-is simple and deterministic, but it can switch people when their apparent
-sizes change; there is no persistent identity association.
+El objetivo es ese centro, no un punto facial específico. Si no hay
+rectángulos, el objetivo queda inactivo y el controlador mantiene la posición.
+Elegir el rectángulo más grande es sencillo y determinista, pero puede
+cambiar de persona si cambian sus tamaños aparentes; no se conserva una
+identidad entre fotogramas.
 
-## 7. Hand landmarks and relative pinch
+## 7. Puntos de la mano y gesto de pinza relativo
 
-`HandDetector.detect()` converts the reduced BGR image to RGB, creates a
-MediaPipe image and calls `detect_for_video()`. Its timestamp is:
+`HandDetector.detect()` convierte la imagen BGR reducida a RGB, crea una
+imagen de MediaPipe y llama a `detect_for_video()`. La marca de tiempo es:
 
 ```python
 timestamp_ms = max(last_timestamp_ms + 1, time.monotonic_ns() // 1_000_000)
 ```
 
-This ensures strictly increasing timestamps even when frames arrive close
-together or the user switches modes. The configured detector handles one
-hand and uses 0.6 for detection, presence and tracking confidence thresholds.
-The application uses 21 normalized hand landmarks from MediaPipe; it does not
-use a per-fingertip confidence value. [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/python).
+Esto garantiza marcas de tiempo estrictamente crecientes, incluso si llegan
+fotogramas muy próximos o el usuario cambia de modo. El detector está
+configurado para una mano y usa 0.6 como umbral de confianza de detección,
+presencia y seguimiento. La aplicación usa los 21 puntos normalizados de
+MediaPipe; no usa una confianza individual para cada punta de dedo.
+[MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/python).
 
-`hand_target()` maps each normalized point back to HD pixel coordinates:
+`hand_target()` transforma cada punto normalizado a píxeles de la imagen HD:
 
 ```python
 pixel_x = landmark.x * width
 pixel_y = landmark.y * height
 ```
 
-Relevant landmark indices are 4 (thumb tip), 8 (index tip), 5 (index knuckle)
-and 17 (pinky knuckle). The default movement target is landmark 8. A palm-center
-alternative exists in the function but is not exposed by the interface.
+Los índices relevantes son 4, punta del pulgar; 8, punta del índice; 5,
+nudillo del índice; y 17, nudillo del meñique. El objetivo de movimiento por
+defecto es el punto 8. La función también admite el centro de la palma, pero
+esa alternativa no está disponible en la interfaz.
 
-The pinch calculation is:
+La pinza se calcula así:
 
 ```text
-r = distance(thumb tip, index tip) / distance(index knuckle, pinky knuckle)
+r = distancia(punta del pulgar, punta del índice)
+    / distancia(nudillo del índice, nudillo del meñique)
 ```
 
-A 15-pixel tip gap with a 100-pixel palm gives `r = 0.15`. Moving closer might
-produce a 30-pixel gap and a 200-pixel palm: the ratio remains 0.15. This is why
-the threshold is a percentage of palm width rather than a fixed pixel count.
-Distances are computed after conversion to pixels so image aspect ratio is
-accounted for.
+Una separación de 15 píxeles entre puntas con una palma de 100 píxeles da
+`r = 0.15`. Al acercar la mano podrían obtenerse 30 píxeles y 200 píxeles,
+respectivamente: la proporción sigue siendo 0.15. Por eso el ajuste es un
+porcentaje del ancho de la palma y no una cantidad fija de píxeles.
+Las distancias se calculan después de convertir las coordenadas a píxeles,
+para tener en cuenta la proporción de la imagen.
 
-The default threshold is 0.20; the UI accepts 0.05–0.60. With hysteresis:
+El umbral predeterminado es 0.20 y la interfaz acepta valores entre 0.05 y
+0.60. Se aplica **histéresis**, es decir, umbrales distintos para activar y
+soltar el gesto:
 
-- An inactive pinch becomes active at `r <= threshold`.
-- An active pinch remains active at `r <= threshold + 0.06`.
-- At the default setting, activation is 20% and release occurs above 26%.
+- Una pinza inactiva se activa cuando `r <= threshold`.
+- Una pinza activa se mantiene mientras `r <= threshold + 0.06`.
+- Con el ajuste predeterminado, se activa al 20% y se suelta por encima del 26%.
 
-The gap between thresholds avoids rapid on/off changes near the boundary.
-Missing, non-finite, out-of-image required points or a zero-width palm disable
-movement. Uniform size changes cancel out, but hand rotation, perspective and
-occlusion can still affect the ratio.
+Esta separación evita cambios rápidos entre activo e inactivo cerca del
+límite. Se desactiva el movimiento si faltan puntos necesarios, no son
+finitos, están fuera de la imagen o el ancho de la palma es cero.
+Los cambios uniformes de tamaño se compensan, pero la rotación, la
+perspectiva y los dedos ocultos todavía pueden afectar la proporción.
 
-## 8. From a target to servo commands
+## 8. Del objetivo a los comandos de los servos
 
-`TrackingTarget` contains `position`, `active` and `status`. This common data
-structure lets `MotionController` operate without knowing whether the target
-came from a face or a hand.
+`TrackingTarget` contiene `position`, `active` y `status`. Esta estructura
+común permite que `MotionController` funcione sin saber si el objetivo
+proviene de un rostro o de una mano.
 
-### 8.1 Movement gate and smoothing
+### 8.1 Condición de movimiento y suavizado
 
-Movement requires both `enabled` and `target.active`. Otherwise the filter
-is cleared and the controller sends zero corrections according to its timing
-and transition rules.
+Para moverse deben ser verdaderos tanto `enabled` como `target.active`.
+En caso contrario se limpia el filtro y se envían correcciones cero según
+las reglas de tiempo y de transición del controlador.
 
-An exponential moving average smooths target coordinates:
+Las coordenadas se suavizan mediante una media móvil exponencial:
 
 ```text
 filtered = (1 − alpha) × previous_filtered + alpha × measured
 alpha = 0.65
 ```
 
-The first valid target initializes the filter directly. Larger alpha values
-favor the newest measurement; smaller values increase smoothing and delay.
-Filtering reduces jitter but cannot remove camera/inference latency.
+`filtered` es la posición filtrada, `previous_filtered` es su valor anterior
+y `measured` es la medición actual. El primer objetivo válido inicializa el
+filtro directamente. Un valor mayor de alpha da más peso a la medición nueva;
+un valor menor aumenta el suavizado y el retraso. El filtro reduce las
+oscilaciones, pero no elimina la latencia de cámara e inferencia.
 
-### 8.2 Resolution-independent error
+### 8.2 Error independiente de la resolución
 
-The camera center is `(width / 2, height / 2)`. Control constants were tuned
-using 640×480 coordinates, so errors are normalized:
+El centro de la cámara es `(width / 2, height / 2)`. Las constantes del
+control se ajustaron con coordenadas de 640×480, por lo que los errores se
+normalizan:
 
 ```text
 error_x = (target_x − width / 2) × 640 / width
 error_y = (target_y − height / 2) × 480 / height
 ```
 
-The same normalization is applied to measured and filtered positions. This
-keeps a target at the same relative frame location from causing a larger
-correction simply because the capture resolution increased. A changed field
-of view can still change how scene movement maps to pixels.
+La misma normalización se aplica a las posiciones medidas y filtradas.
+Así, un objetivo en la misma posición relativa del fotograma no genera una
+corrección mayor únicamente porque aumentó la resolución. Un cambio de campo
+de visión sí puede modificar la relación entre el movimiento de la escena
+y los píxeles.
 
-### 8.3 Deadband, proportional gain and step limit
+### 8.3 Zona muerta, ganancia proporcional y límite de paso
 
-`calculate_axis_step()` returns zero if the current measured error is within
-10 reference pixels of center, or if measured and filtered errors have
-opposite signs. The latter stops stale smoothing history from continuing in
-the old direction after the target crosses the center.
+`calculate_axis_step()` devuelve cero si el error medido actual está a
+10 píxeles de referencia o menos del centro, o si los errores medido y
+filtrado tienen signos opuestos. Esta segunda condición evita que el
+historial del filtro siga moviendo la cámara en la dirección anterior
+cuando el objetivo ya cruzó el centro.
 
-Otherwise `calculate_step()` applies:
+En otro caso, `calculate_step()` aplica:
 
 ```python
 step = int(0.035 * filtered_error)
 step = max(-3, min(3, step))
 ```
 
-It also applies the deadband to the filtered error. `int()` truncates toward
-zero, so small errors outside the 10-pixel deadband can still produce a zero
-step. This is a bounded proportional controller with smoothing, not PID:
-there is no integral or derivative term.
+También aplica la zona muerta al error filtrado. `int()` trunca hacia cero,
+por lo que algunos errores pequeños, aunque estén fuera de los 10 píxeles,
+todavía producen un paso cero. Es un controlador proporcional limitado y
+suavizado, **no un PID**: no contiene término integral ni derivativo.
 
-### 8.4 Numerical example and direction
+### 8.4 Ejemplo numérico y dirección
 
-Assume a first target at `(840, 450)` in a 1280×720 image:
+Supongamos un primer objetivo en `(840, 450)` dentro de una imagen de 1280×720:
 
 ```text
-Center:                    (640, 360)
-Raw error:                 (200, 90)
-Normalized error:          (100, 60)
-Proportional integer step: (3, 2)
-Python signs:              PAN_SIGN=+1, TILT_SIGN=−1
-Serial message:            "3,-2\n"
+Centro:                     (640, 360)
+Error en píxeles originales: (200, 90)
+Error normalizado:          (100, 60)
+Paso proporcional entero:   (3, 2)
+Signos en Python:           PAN_SIGN=+1, TILT_SIGN=−1
+Mensaje serial:             "3,-2\n"
 ```
 
-The firmware then executes `panPos -= dx` and `tiltPos += dy`. From the home
-angles `(80, 100)`, that message requests `(77, 98)`. Direction depends on
-both the Python signs and the physical servo mounting; changing only one
-side can reverse following.
+El firmware ejecuta después `panPos -= dx` y `tiltPos += dy`. Desde los
+ángulos iniciales `(80, 100)`, ese mensaje solicita `(77, 98)`. La dirección
+depende tanto de los signos en Python como del montaje físico de los servos;
+cambiar solo una parte puede invertir el seguimiento.
 
-### 8.5 Timing and stop behavior
+### 8.5 Temporización y parada
 
-Normal corrections are sent no more frequently than every 0.05 seconds.
-Stopping an active target or bringing an axis to zero can send an earlier
-`0,0`. This prevents an early stop from repeating the other axis's movement.
-The actual command rate may be lower if frames take longer to process.
+Las correcciones normales se envían con una separación mínima de 0.05
+segundos. La desactivación de un objetivo o el cambio de un eje a cero puede
+provocar un `0,0` anticipado. Esto evita que una parada repita el movimiento
+del otro eje. La frecuencia real puede ser menor si cada fotograma tarda
+más en procesarse.
 
-The firmware treats each pair as a one-time angle increment, not a continuous
-velocity. `0,0` means no angle change; it does not detach the servos or send
-them home. `MotionController.stop()` also clears smoothing and timing state.
+El firmware interpreta cada pareja como un incremento de ángulo aplicado
+una sola vez, no como una velocidad continua. `0,0` significa que el ángulo
+no cambia; no desconecta los servos ni los manda a Home.
+`MotionController.stop()` también limpia el suavizado y el estado temporal.
 
-## 9. Serial protocol and Home
+## 9. Protocolo serial y Home
 
-Python uses `pyserial` at 115200 baud and writes ASCII lines terminated by a
-newline. It does not wait for acknowledgments.
+Python usa `pyserial` a 115200 baudios y escribe líneas ASCII terminadas con
+un salto de línea. No espera confirmaciones del Arduino.
 
-| Message | Firmware behavior |
+| Mensaje | Comportamiento del firmware |
 | --- | --- |
-| `3,-2\n` | Subtract 3 from pan and add −2 to tilt, then constrain to 0–180°. |
-| `0,0\n` | Keep the stored angles. |
-| `H\n` | Approach pan 80° and tilt 100° by at most 2° per axis. |
+| `3,-2\n` | Restar 3 a pan y sumar −2 a tilt; limitar después los ángulos a 0–180°. |
+| `0,0\n` | Mantener los ángulos almacenados. |
+| `H\n` | Acercarse a pan 80° y tilt 100°, con un máximo de 2° por eje. |
 
-The Arduino sketch attaches pan to pin 9 and tilt to pin 10. On startup it
-writes the home angles. Python delays serial opening until a movement feature
-needs it, avoiding an Arduino reset merely to view a Static camera session.
+El programa de Arduino conecta pan al pin 9 y tilt al pin 10. Al arrancar
+escribe los ángulos iniciales. Python retrasa la apertura del puerto serial
+hasta que alguna función de movimiento lo necesita, evitando reiniciar el
+Arduino solamente por visualizar la cámara en Static.
 
-`TrackingService.home()` switches mode to Static, disables tracking,
-increments `revision`, and schedules 50 `H` commands. The worker sends at
-most one Home command per tick, with at least 50 ms between commands.
-The greatest distance from either 0–180° limit to either home angle is 100°,
-so 50 commands at 2° cover that range. `approach()` clamps each step to the
-target; extra commands do not move past home.
+`TrackingService.home()` cambia a Static, deshabilita el seguimiento,
+incrementa `revision` y programa 50 comandos `H`. El hilo envía como máximo
+uno por iteración, con al menos 50 ms entre comandos. La distancia máxima
+desde los límites de 0–180° hasta cualquiera de los ángulos iniciales es
+100°; por eso 50 comandos de 2° cubren todo el recorrido.
+`approach()` limita cada paso al objetivo, de modo que comandos adicionales
+no sobrepasan la posición inicial.
 
-Home takes about 2.5 seconds or longer depending on worker timing and serial
-startup. Stop session cancels pending commands. There is no encoder reading
-or firmware acknowledgment; completion is a sent-command condition only.
+Home tarda aproximadamente 2.5 segundos o más, según la duración del ciclo
+y el arranque serial. **Stop session** cancela los comandos pendientes.
+No hay lectura de un codificador de posición ni confirmación del firmware:
+la finalización indica que se envió la secuencia, no una llegada física medida.
 
-## 10. Flask, browser streaming and state
+## 10. Flask, transmisión al navegador y estado
 
-The Flask request handlers do not capture frames. They call the shared
-service while its worker owns hardware. `settings` stores requested controls;
-`state` stores phase, connections, measured dimensions, FPS and errors.
-`snapshot()` combines them for the browser.
+Las funciones que atienden peticiones Flask no capturan fotogramas. Llaman al
+servicio compartido, cuyo hilo administra el hardware. `settings` almacena
+los controles solicitados; `state` guarda la fase, conexiones, dimensiones
+medidas, FPS y errores. `snapshot()` combina ambos para el navegador.
 
-| Route | Purpose |
+| Ruta | Propósito |
 | --- | --- |
-| `GET /` | Render the interface template and control token. |
-| `GET /api/status` | Read current shared state. |
-| `GET /api/cameras` | Enumerate physical cameras. |
-| `POST /api/session/start` | Start the worker. |
-| `POST /api/session/stop` | Request cleanup. |
-| `POST /api/settings` | Change mode, tracking, virtual output, preview or pinch. |
-| `POST /api/camera` | Select a physical camera. |
-| `POST /api/home` | Schedule a return-home sequence. |
-| `GET /stream.mjpg` | Stream the latest encoded preview as multipart JPEG. |
+| `GET /` | Generar la interfaz desde la plantilla e incluir el token de control. |
+| `GET /api/status` | Leer el estado compartido actual. |
+| `GET /api/cameras` | Enumerar cámaras físicas. |
+| `POST /api/session/start` | Iniciar el hilo de trabajo. |
+| `POST /api/session/stop` | Solicitar la parada y liberación de recursos. |
+| `POST /api/settings` | Cambiar modo, seguimiento, salida virtual, vista previa o pinza. |
+| `POST /api/camera` | Seleccionar una cámara física. |
+| `POST /api/home` | Programar el regreso a la posición inicial. |
+| `GET /stream.mjpg` | Transmitir la última vista previa codificada como JPEG multipartes. |
 
-`app.js` polls status approximately every 750 ms after a request completes.
-`command()` sends JSON with `X-Control-Token`, prevents overlapping local
-commands, and refreshes controls from confirmed server state. F/H/S are browser
-shortcuts; **H in the browser means Hand**, whereas **H on serial means Home**.
+`app.js` consulta el estado aproximadamente cada 750 ms después de terminar
+una petición. `command()` envía JSON con `X-Control-Token`, evita comandos
+locales simultáneos y actualiza los controles desde el estado confirmado
+por el servidor. F/H/S son atajos del navegador: **H en el navegador significa
+Hand**, mientras que **H en el puerto serial significa Home**.
 
-For video, `_frame()` encodes JPEG bytes and increments `sequence`. The
-`frames()` generator waits on a `Condition` until the sequence changes, or a
-two-second timeout occurs, then yields a multipart JPEG chunk. A slow browser
-gets the latest stored frame rather than an unbounded queue of old frames.
-This is MJPEG over HTTP, not WebRTC and not an OpenCV GUI window.
+Para el video, `_frame()` codifica bytes JPEG e incrementa `sequence`.
+El generador `frames()` espera mediante una `Condition` hasta que cambie
+la secuencia o transcurran dos segundos; después produce una parte JPEG.
+Un navegador lento recibe el último fotograma almacenado, no una cola
+ilimitada de imágenes antiguas. Es MJPEG sobre HTTP, no WebRTC ni una ventana
+gráfica de OpenCV.
 
-**Hide preview** removes the image source in the browser and skips subsequent
-JPEG encoding in the worker. Detection, raw capture and virtual output stay
-active. The current implementation still makes the preview copy and draws
-annotations, so it does not eliminate all preview-related CPU work. Hiding
-preview affects all tabs because the setting belongs to the shared session.
+**Hide preview** elimina la fuente de imagen del navegador y omite las
+siguientes codificaciones JPEG en el hilo. La detección, captura y salida
+virtual siguen activas. La implementación todavía crea la copia de vista
+previa y dibuja sus marcadores, por lo que no elimina todo el trabajo
+relacionado con la visualización. Ocultarla afecta a todas las pestañas,
+porque el ajuste pertenece a la sesión compartida.
 
-POST handlers validate a control token and reject mismatched Origin headers.
-Flask also restricts trusted hosts and binds to loopback. These are local
-control safeguards, not an account/login system for public deployment.
+Las rutas POST validan un token de control y rechazan encabezados Origin
+que no coincidan. Flask también restringe los hosts aceptados y escucha
+solo en la dirección local. Son protecciones para el control local, no
+un sistema de cuentas e inicio de sesión para publicar la app en Internet.
 
-## 11. Concurrency, camera discovery and persistence
+## 11. Concurrencia, detección de cámaras y persistencia
 
-A `threading.Condition` backed by `RLock` protects shared settings and state.
-Inference runs outside the lock so a slow model does not block every HTTP
-request. Before serial correction, the worker compares the saved `revision`
-with the current revision. A pause, Home or mode change during inference
-invalidates the old result.
+Una `threading.Condition` basada en `RLock` protege la configuración y el
+estado compartidos. La inferencia se ejecuta fuera del bloqueo para que un
+modelo lento no detenga todas las peticiones HTTP. Antes de enviar una
+corrección serial, el hilo compara la `revision` guardada con la actual.
+Una pausa, Home o un cambio de modo durante la inferencia invalida el
+resultado anterior.
 
-`threading.Event` communicates stop requests. A `finally` block attempts to
-stop the controller and close virtual output, serial, MediaPipe and capture,
-even when initialization fails partway through. Virtual-output errors have a
-separate handler so detection and preview can continue when only that output
-fails. Camera or serial failures stop the worker and expose an error.
+`threading.Event` comunica las solicitudes de parada. Un bloque `finally`
+intenta detener el controlador y cerrar la salida virtual, el puerto serial,
+MediaPipe y la cámara, incluso si la inicialización falló a medio camino.
+Los errores de salida virtual se manejan por separado para permitir que la
+detección y vista previa continúen si solo falla esa salida. Los errores
+de cámara o serial detienen el hilo y se muestran en el estado.
 
-`camera_devices.list_cameras()` queries V4L2 capabilities without starting a
-capture stream. It excludes metadata-only entries and loopback drivers.
-Selecting a different camera pauses tracking, releases the previous source,
-and recreates virtual output at the new frame size if enabled.
+`camera_devices.list_cameras()` consulta las capacidades de V4L2 sin iniciar
+la captura. Excluye entradas que solo proporcionan metadatos y dispositivos
+virtuales loopback. Seleccionar otra cámara pausa el seguimiento, libera
+la fuente anterior y recrea la salida virtual con el nuevo tamaño si estaba
+habilitada.
 
-Pinch changes are validated and saved to `config/local-settings.json`.
-`local_settings.py` writes a temporary file, flushes and syncs it, then replaces
-the settings file atomically. A failed save leaves the current in-memory
-threshold unchanged. Missing or invalid saved settings use 0.20. Only pinch
-is persisted; process startup defaults to Static, with motion/output off and
-preview on. Stopping and starting a session in the same process can retain
-other in-memory selections, so it is different from restarting the app.
+Los cambios de pinza se validan y guardan en `config/local-settings.json`.
+`local_settings.py` escribe un archivo temporal, vacía y sincroniza los
+búferes y reemplaza el archivo de configuración de forma atómica. Si falla
+el guardado, el umbral en memoria no cambia. Si el archivo falta o contiene
+datos inválidos, se usa 0.20.
 
-## 12. Performance, observations and limitations
+Solo se conserva la pinza entre ejecuciones. Al iniciar el proceso se usa
+Static, con movimiento y salida apagados y vista previa encendida. Detener
+y reiniciar una sesión dentro del mismo proceso puede conservar otras
+selecciones en memoria; no equivale a reiniciar toda la aplicación.
 
-The `fps` metric counts completed worker frames over approximately half-second
-windows. `inference_ms` includes resizing, the selected model call, target
-extraction and its annotations. It excludes JPEG encoding, virtual output
-and most capture work. Neither value measures full camera-to-screen or
-camera-to-servo latency.
+## 12. Rendimiento, observaciones y limitaciones
 
-During one local check, the app reported about 21.6 FPS and 36.7 ms in Face
-mode while physical capture and virtual output were both 1280×720. This was a
-single observation, not a controlled benchmark or guaranteed performance.
+La métrica `fps` cuenta los fotogramas completados por el hilo en intervalos
+de aproximadamente medio segundo. `inference_ms` incluye la reducción de
+imagen, la llamada al modelo seleccionado, la extracción del objetivo y sus
+marcadores. Excluye la codificación JPEG, la salida virtual y la mayor parte
+de la captura. Ningún valor mide el retraso completo de cámara a pantalla o
+de cámara a servo.
 
-Lower inference resolution reduces work, but can lose small details. HD
-capture still costs decoding, memory copies, encoding and output bandwidth.
-There is no separate capture/inference pipeline or guaranteed constant-rate
-virtual stream. The small requested capture buffer reduces potential queuing
-where supported, but does not guarantee that all camera drivers honor it.
+En una comprobación local, la app informó aproximadamente 21.6 FPS y 36.7 ms
+en modo Face, mientras la captura física y la salida virtual eran de
+1280×720. Fue una observación puntual, no una medición controlada ni una
+promesa de rendimiento.
 
-Other limits include hand occlusion, rotated palms, face-target switching,
-fixed gain and open-loop servo actuation. The system holds position when a
-target disappears; it does not automatically return Home on detection loss.
-An HD virtual device also does not guarantee a remote meeting participant
-receives HD, because the receiving application controls its own processing
-and transmission.
+Reducir la resolución de inferencia disminuye el trabajo, pero puede perder
+detalles pequeños. Capturar en HD sigue requiriendo decodificación, copias
+de memoria, codificación y ancho de banda de salida. No hay hilos separados
+para captura e inferencia ni una frecuencia constante garantizada para la
+cámara virtual. El búfer pequeño solicitado reduce la posible acumulación
+de imágenes donde se admite, pero no todos los controladores de cámara
+necesariamente respetan ese ajuste.
 
-## 13. Tests and how to demonstrate them
+Otras limitaciones son los dedos ocultos, las palmas giradas, el cambio de
+rostro objetivo, la ganancia fija y el accionamiento de servos sin lectura
+de su posición. Si desaparece el objetivo se mantiene la posición; no se
+regresa a Home automáticamente. Tener un dispositivo virtual HD tampoco
+garantiza que otro participante reciba HD, porque la aplicación de
+videollamadas controla su procesamiento y transmisión.
 
-Run from the repository root:
+## 13. Pruebas y demostración
+
+Desde la raíz del repositorio, ejecuta:
 
 ```bash
 .venv/bin/python -B -m unittest discover -s tests -v
 ```
 
-The current suite has 34 tests across two files:
+La suite actual contiene 34 pruebas distribuidas en dos archivos:
 
-| Area | Examples of checked behavior |
+| Área | Ejemplos de lo que se comprueba |
 | --- | --- |
-| Targets and coordinates | Largest face, HD box mapping, valid hand landmarks. |
-| Pinch | Relative scale invariance, hysteresis, missing/invalid references. |
-| Motion | Same corrections at different capture resolutions, stale-filter stops, serial sequences. |
-| HTTP and lifecycle | Validation, token/origin checks, Static mode, preview-only restrictions, start/stop. |
-| Home | Correct pacing/count, pause during inference, coverage of firmware angle bounds. |
-| Outputs | Clean virtual frames, output failure handling, skipped JPEG encoding when hidden. |
-| Persistence and cleanup | Restored pinch, failed save, partial initialization and closed resources. |
+| Objetivos y coordenadas | Rostro más grande, conversión de rectángulos a HD y puntos de mano válidos. |
+| Pinza | Invariancia frente a cambios uniformes de tamaño, histéresis y referencias inválidas o ausentes. |
+| Movimiento | Mismas correcciones a distintas resoluciones, parada ante historial desactualizado y secuencias seriales. |
+| HTTP y ciclo de vida | Validación, token/origen, Static, restricciones de preview-only e inicio/parada. |
+| Home | Cantidad y separación de comandos, pausa durante inferencia y cobertura de los límites angulares. |
+| Salidas | Fotogramas virtuales limpios, manejo de fallos y omisión de JPEG al ocultar la vista previa. |
+| Persistencia y limpieza | Restauración de pinza, fallo de guardado, inicialización parcial y liberación de recursos. |
 
-The tests use synthetic frames and mocked devices; they do not require a
-moving Arduino. They verify algorithms and integration behavior, not trained
-model accuracy, mechanical tracking quality or a real meeting connection.
+Las pruebas usan imágenes sintéticas y dispositivos simulados; no necesitan
+mover un Arduino. Verifican algoritmos y comportamiento de integración,
+no la precisión de los modelos, la calidad mecánica del seguimiento ni una
+conexión real de videollamada.
 
-For a hardware demonstration, start Static, show the HD preview, then select
-Face. Move slowly across the image and explain the center error. Select Hand,
-show that open fingers do not move the camera, and pinch to enable following.
-Demonstrate Home returning to Static and then hide preview while virtual
-output remains enabled. Finish with Stop session.
+Para demostrar el hardware, inicia en Static y muestra la vista HD. Después
+selecciona Face, muévete lentamente por la imagen y explica el error respecto
+al centro. Selecciona Hand y muestra que los dedos abiertos no mueven la
+cámara; realiza la pinza para habilitar el seguimiento. Demuestra que Home
+regresa a Static y oculta la vista previa mientras continúa la salida
+virtual. Termina con **Stop session**.
 
-## 14. Suggested classroom presentation
+## 14. Guion sugerido para explicar al profesor
 
-A six-to-eight-minute explanation can follow this order:
+Una exposición de seis a ocho minutos puede seguir este orden:
 
-1. **Problem and result:** demonstrate a camera following a target.
-2. **OpenCV pipeline:** show `camera.read()`, NumPy shape, `raw.copy()` and
-   `tracking_frame()`. Explain why video and inference use different sizes.
-3. **Detection versus application logic:** show the model calls, then the
-   custom largest-face and pinch calculations in `tracking_targets.py`.
-4. **Movement mathematics:** work through the `(840, 450)` example and show
-   `MotionController.update()` plus the matching Arduino subtraction/addition.
-5. **Interface and concurrency:** show one Flask route and explain why the
-   hardware loop lives in a worker, with revision checks before movement.
-6. **Evidence and limitations:** run the tests, identify what mocks cannot
-   prove, and discuss lighting, latency and the lack of position feedback.
+1. **Problema y resultado:** mostrar la cámara siguiendo un objetivo.
+2. **Procesamiento con OpenCV:** enseñar `camera.read()`, la forma del arreglo
+   NumPy, `raw.copy()` y `tracking_frame()`. Explicar por qué el video y la
+   inferencia usan tamaños distintos.
+3. **Detección y lógica propia:** mostrar las llamadas a los modelos y después
+   los cálculos de selección de rostro y de pinza en `tracking_targets.py`.
+4. **Matemáticas del movimiento:** desarrollar el ejemplo `(840, 450)` y
+   enseñar `MotionController.update()` junto con la resta y suma del Arduino.
+5. **Interfaz y concurrencia:** mostrar una ruta Flask y explicar por qué el
+   ciclo de hardware vive en un hilo, con revisión del estado antes de mover.
+6. **Pruebas y limitaciones:** ejecutar las pruebas, explicar lo que las
+   simulaciones no demuestran y comentar iluminación, latencia y ausencia
+   de medición de posición.
 
-Useful questions to rehearse:
+Preguntas útiles para ensayar:
 
-| Question | Answer grounded in this implementation |
+| Pregunta | Respuesta basada en esta implementación |
 | --- | --- |
-| Did you build or train YOLO/MediaPipe? | No. The project integrates pretrained models and implements the surrounding control system. |
-| Why OpenCV if YOLO detects faces? | OpenCV supplies capture, image transformations, annotations and preview encoding. |
-| Why does the code use two image sizes? | To preserve output quality while limiting inference input size. |
-| Is this PID? | No. It uses proportional integer corrections, exponential smoothing, a deadband and step limits. |
-| Why a relative pinch? | A ratio compensates for uniform changes in apparent hand size. |
-| Why not send absolute angles from Python? | The firmware owns the stored servo angles; Python sends small relative corrections. |
-| Does Home confirm the physical position? | No. It sends enough bounded approach commands for the firmware's allowed angle range. |
-| Why Flask instead of imshow? | A browser can combine preview, configuration and output controls while Python keeps one shared worker. |
-| What would you improve next? | Measure end-to-end latency, separate capture from inference if profiling justifies it, and add feedback/acknowledgments before claiming measured position. |
+| ¿Construiste o entrenaste YOLO/MediaPipe? | No. El proyecto integra modelos preentrenados e implementa el sistema de control que los utiliza. |
+| ¿Para qué OpenCV si YOLO detecta los rostros? | OpenCV proporciona captura, transformaciones de imagen, marcadores y codificación de vista previa. |
+| ¿Por qué se usan dos tamaños de imagen? | Para conservar la calidad de salida y limitar el tamaño de entrada a la inferencia. |
+| ¿Es un PID? | No. Usa correcciones proporcionales enteras, suavizado exponencial, zona muerta y límites de paso. |
+| ¿Por qué una pinza relativa? | Una proporción compensa cambios uniformes del tamaño aparente de la mano. |
+| ¿Por qué Python no envía ángulos absolutos? | El firmware mantiene los ángulos de los servos; Python envía correcciones relativas pequeñas. |
+| ¿Home confirma la posición física? | No. Envía suficientes comandos de aproximación para cubrir el rango angular permitido por el firmware. |
+| ¿Por qué Flask en lugar de imshow? | El navegador reúne video, configuración y controles de salida mientras Python mantiene un solo hilo de trabajo compartido. |
+| ¿Qué mejorarías después? | Medir la latencia completa, separar captura e inferencia si las mediciones lo justifican y añadir realimentación o confirmaciones antes de afirmar que se mide la posición. |
 
-A concise description to practice: “My Python program uses OpenCV to acquire
-and prepare images, pretrained models to locate a target, and custom control
-logic to convert its displacement from the image center into serial servo
-corrections. Flask provides the interface, while a separate clean image path
-feeds a virtual camera.”
+Una descripción breve para practicar:
+
+> Mi programa de Python usa OpenCV para adquirir y preparar imágenes,
+> modelos preentrenados para localizar un objetivo y lógica de control propia
+> para convertir su desplazamiento respecto al centro de la imagen en
+> correcciones seriales para los servos. Flask proporciona la interfaz,
+> mientras una ruta de imagen limpia alimenta la cámara virtual.
