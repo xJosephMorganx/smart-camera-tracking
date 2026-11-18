@@ -10,7 +10,7 @@ Python application converts them into relative servo commands for Arduino.
 
 ## Preview
 
-![PanTilt camera interface](docs/images/camera-studio.jpg)
+![PanTilt camera interface](docs/images/camera-studio.png)
 
 ## Features
 
@@ -174,7 +174,7 @@ smart-camera-tracking/
 ├── docs/
 │   ├── code-walkthrough.md
 │   ├── web-interface.md
-│   └── images/camera-studio.jpg
+│   └── images/camera-studio.png
 ├── tests/                     # Synthetic image, API and mocked hardware tests
 ├── requirements.txt
 ├── README.md

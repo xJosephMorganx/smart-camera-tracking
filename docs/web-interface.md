@@ -189,7 +189,7 @@ frame rate still depend on camera and CPU throughput.
 
 ## Preview
 
-![Camera studio interface](images/camera-studio.jpg)
+![Camera studio interface](images/camera-studio.png)
 
 ## Validation
 
