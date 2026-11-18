@@ -146,9 +146,6 @@ the package matching your distribution and kernel. See the
 
 ## Documentation
 
-- **[Code walkthrough and presentation guide (Spanish)](docs/code-walkthrough.md)** —
-  frame-by-frame explanation, OpenCV operations, formulas, serial protocol,
-  concurrency, tests, limitations and a classroom demonstration plan.
 - **[Usage and troubleshooting](docs/web-interface.md)** — controls, virtual
   output, camera selection, pinch, Home and resolution settings.
 
@@ -172,7 +169,6 @@ smart-camera-tracking/
 ├── models/                    # Downloaded assets; ignored by Git
 ├── config/local-settings.json # Local pinch setting; generated and ignored
 ├── docs/
-│   ├── code-walkthrough.md
 │   ├── web-interface.md
 │   └── images/camera-studio.png
 ├── tests/                     # Synthetic image, API and mocked hardware tests

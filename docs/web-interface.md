@@ -200,5 +200,3 @@ frame rate still depend on camera and CPU throughput.
 Tests cover mode switching, pinch release, static mode, stale inference after
 pause, API validation, MJPEG, cleanup, and clean virtual output using fakes.
 Actual Meet selection requires the loopback device to be created first.
-For the implementation, formulas and classroom presentation plan, see the
-[code walkthrough](code-walkthrough.md).
