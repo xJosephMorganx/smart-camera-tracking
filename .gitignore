@@ -18,3 +18,6 @@ runs/
 # Operating system metadata
 .DS_Store
 Thumbs.db
+
+# Per-machine tracking preferences
+config/local-settings.json

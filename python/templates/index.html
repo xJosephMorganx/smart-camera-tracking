@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="control-token" content="{{ control_token }}">
+  <title>PanTilt · Camera Tracking</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body>
+  <header class="topbar"><h1><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><circle cx="12" cy="12" r="4"/></svg><span>PanTilt <span class="title-description">· Camera Tracking</span></span></h1><span class="header-status"><i id="camera-dot"></i><span id="phase">Offline</span></span></header>
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="session-actions">
+        <button id="session-button" class="session-button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="session-play" d="m9 5 10 7-10 7Z"/><rect class="session-stop" x="6" y="6" width="12" height="12" rx="2"/></svg>
+          <span id="session-label">Start session</span>
+        </button>
+        <button id="home-button" class="session-button home-button" title="Return to the initial position and pause tracking" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10 12 3l8 7v10H4Z"/><path d="M9 20v-7h6v7"/></svg><span id="home-label">Home</span></button>
+      </div>
+      <section>
+        <div class="section-heading"><h2>Camera</h2><button id="refresh-cameras" class="icon-button" aria-label="Refresh camera list" title="Refresh camera list">↻</button></div>
+        <label class="sr-only" for="camera-select">Camera source</label>
+        <select id="camera-select"><option>Loading cameras…</option></select>
+        <p id="camera-help" class="muted">Changing camera pauses servo tracking.</p>
+      </section>
+      <section>
+        <h2>Tracking mode</h2>
+        <div class="mode-picker" role="group" aria-label="Tracking mode"><button data-mode="static" aria-pressed="true" class="selected" title="Static (S)">Static</button><button data-mode="face" aria-pressed="false" title="Face (F)">Face</button><button data-mode="hand" aria-pressed="false" title="Hand (H)">Hand</button></div>
+        <p id="motion-status" class="muted">Static</p>
+        <details class="tracking-settings"><summary>Settings</summary>
+          <label class="switch-row" for="tracking"><span>Servo tracking</span><input type="checkbox" id="tracking" role="switch"></label>
+          <p id="motion-help" class="muted">Static mode keeps the current position.</p>
+          <div class="pinch-control"><label for="pinch-threshold">Hand pinch <output id="pinch-value">20% of palm</output></label><input id="pinch-threshold" type="range" min="0.05" max="0.60" step="0.01" value="0.20" aria-describedby="pinch-help" disabled><p id="pinch-help" class="muted">Lower = fingers closer. Release above <span id="pinch-release">26%</span> of palm width. Saved automatically.</p></div>
+        </details>
+      </section>
+      <section class="output-section"><h2>Output</h2>
+        <button id="virtual" class="output-button" type="button" aria-pressed="false" aria-label="Virtual camera" aria-describedby="output-status" disabled>
+          <span class="output-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="12" height="12" rx="3"/><path d="m15 10 6-3v10l-6-3"/></svg></span>
+          <span class="output-button-copy"><strong>Virtual camera</strong><span id="output-action">Offline</span></span>
+          <span class="output-indicator" aria-hidden="true"></span>
+        </button>
+        <p id="output-status" class="muted">Virtual camera inactive</p>
+        <p class="output-note">Select <strong>PanTilt</strong> in your video app.</p>
+        <p id="virtual-error" class="error" role="alert" hidden></p>
+        <details class="setup"><summary>Virtual camera setup</summary><p class="muted">If the virtual device is missing, run:</p><code>sudo modprobe v4l2loopback video_nr=10 card_label=PanTilt exclusive_caps=1</code><p class="muted">Enable output, then select PanTilt in your video application. OBS is not required.</p></details>
+      </section>
+      <div class="sidebar-bottom">
+        <div class="connections"><div><span>Camera <small id="camera-name"></small></span><span id="camera-state">Idle</span></div><div><span>Arduino <small id="serial-name"></small></span><span id="serial-state">Idle</span></div><div><span>Virtual output</span><span id="virtual-state">Off</span></div></div>
+        <div id="error" class="error" role="alert" hidden></div>
+      </div>
+    </aside>
+    <section id="preview-stage" class="preview-stage" aria-label="Camera preview">
+      <div id="monitor" class="monitor">
+        <div class="video-area" id="video-area"><img id="preview" src="/stream.mjpg" alt="Live camera preview"><div id="empty-state" class="empty-state"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><circle cx="12" cy="12" r="4"/></svg><h2>Camera preview</h2><p>Choose a camera and start a session.</p></div></div>
+        <div class="monitor-footer"><button id="preview-toggle" class="preview-toggle" type="button" aria-pressed="false" disabled>Hide preview</button><span id="tracking-status">Ready to connect</span><span class="metrics"><span><b id="fps">—</b> FPS</span><span><b id="latency">—</b> ms</span><span id="resolution">640 × 480</span></span></div>
+        <p class="shortcuts"><kbd>S</kbd> Static <kbd>F</kbd> Face <kbd>H</kbd> Hand</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
